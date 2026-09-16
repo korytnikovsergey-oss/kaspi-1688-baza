@@ -1,0 +1,51 @@
+name: Сборщик базы 1688
+
+on:
+  schedule:
+    # Каждые 30 минут — короткий заход, как будто зашёл человек, посмотрел
+    # несколько карточек и ушёл. Время в UTC. Начинаем осторожно: реальный
+    # ритм, который 1688 терпит, ещё не измерен (это и есть задача block_log) —
+    # когда наберётся статистика, интервал и бюджет можно будет смело увеличить.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}  # можно запустить руками кнопкой "Run workflow" на GitHub
+
+# Не даём двум заходам работать одновременно над одной базой —
+# следующий просто подождёт своей очереди, а не столкнётся с предыдущим.
+concurrency:
+  group: crawler-1688
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # нужно, чтобы сам workflow мог закоммитить обновлённую базу обратно в репозиторий
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Забрать код и базу из репозитория
+        uses: actions/checkout@v4
+
+      - name: Поставить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Поставить Playwright и Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Запустить сборщик (короткий заход)
+        env:
+          CRAWLER_HEADLESS: "1"
+          CRAWLER_RUN_BUDGET_SEC: "180"   # ~3 минуты активной работы за один заход
+        run: python crawler_1688.py
+
+      - name: Сохранить базу обратно в репозиторий, если она изменилась
+        run: |
+          git config user.name "1688 crawler bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add base_1688.sqlite
+          git diff --cached --quiet || git commit -m "Автообновление базы 1688"
+          git push
